@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>KYTH JARVIS</title>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://accounts.google.com/gsi/client" async defer onload="window.dispatchEvent(new Event('gis-ready'))"></script>
 <style>
 :root{--c:#00e5ff;--c2:#7c4dff;--bg:#05070d;--tx:#d8f6ff;--dim:#6f8ea0;--ok:#3dffa8;--bad:#ff5470;--warn:#ffc24d}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -180,7 +180,7 @@ function mergeRemote(d,remoteWins){const L=data,del=mergeDel(L.deleted,d.deleted
 /* ---------- Connection state ---------- */
 const SCOPE='https://www.googleapis.com/auth/drive.file';
 const ST={offline:['Drive offline',''],connecting:['Connecting…',''],connected:['Drive connected','on'],reconnect:['Reconnect required','bad']};
-let driveState='offline',tokenExp=0,tcCid='',waiter=null,waiterT=0,driveReady=false,remoteMod=null,pending=false,silentBlocked=false,refreshT=0,saveQ=Promise.resolve();
+let driveState='offline',tokenExp=0,tcCid='',waiter=null,waiterT=0,driveReady=false,remoteMod=null,pending=false,silentBlocked=false,tapArmed=false,tapUsed=false,autoStarted=false,refreshT=0,saveQ=Promise.resolve();
 const clientId=()=>$('#cid').value.trim(), linked=()=>localStorage.getItem('kyth_linked')==='1';
 const gisReady=()=>!!(window.google&&google.accounts&&google.accounts.oauth2);
 function setDrive(st,msg){driveState=st;const[t,c]=ST[st];
@@ -190,8 +190,9 @@ function setDrive(st,msg){driveState=st;const[t,c]=ST[st];
 
 /* ---------- Google token (kept in memory only, never in localStorage) ---------- */
 function getTC(){const c=clientId();
-  if(!tc||tcCid!==c){tcCid=c;tc=google.accounts.oauth2.initTokenClient({client_id:c,scope:SCOPE,callback:onToken,
+  if(!tc||tcCid!==c){tcCid=c;tc=google.accounts.oauth2.initTokenClient({client_id:c,scope:SCOPE,callback:onToken,...hintCfg(),
     error_callback:e=>settle(new Error((e&&e.type)||'popup_error'))})}return tc}
+const hintCfg=()=>{const h=localStorage.getItem('kyth_hint');return h?{hint:h}:{}};
 function settle(err,tok){const w=waiter;waiter=null;clearTimeout(waiterT);if(w)err?w.rej(err):w.res(tok)}
 function onToken(r){
   if(r.error)return settle(new Error(r.error));
@@ -202,16 +203,14 @@ function requestToken(prompt){return new Promise((res,rej)=>{
   if(!clientId())return rej(new Error('no_client_id'));
   if(waiter)settle(new Error('superseded'));
   waiter={res,rej};waiterT=setTimeout(()=>settle(new Error('timeout')),20000);
-  try{getTC().requestAccessToken({prompt})}catch(e){settle(e)}})}
+  try{getTC().requestAccessToken({prompt,...hintCfg()})}catch(e){settle(e)}})}
 function scheduleRefresh(){clearTimeout(refreshT);
-  refreshT=setTimeout(()=>{if(!silentBlocked)connect('none')},Math.max(15000,tokenExp-Date.now()-300000))}
+  refreshT=setTimeout(()=>{if(!silentBlocked){tapUsed=false;armTap()}},Math.max(15000,tokenExp-Date.now()-300000))}
 
-async function api(url,opt={},retry=true){
-  if(!token)throw new Error('interaction_required');
+async function api(url,opt={}){
+  if(!token)throw new Error('gesture_required');
   const r=await fetch(url,{...opt,headers:{Authorization:'Bearer '+token,...(opt.headers||{})}});
-  if(r.status===401&&retry){token=null;tokenExp=0;
-    if(silentBlocked)throw new Error('interaction_required');
-    await requestToken('none');return api(url,opt,false)}
+  if(r.status===401){token=null;tokenExp=0;throw new Error('gesture_required')}   // expired: forget it, let failConnect() decide; never ask Google from here
   if(!r.ok)throw new Error(String(r.status));return r}
 
 /* ---------- Drive memory ---------- */
@@ -255,33 +254,56 @@ function commit(){saveLocal();render();syncSoon()}
 /* ---------- Connect / reconnect ---------- */
 async function connect(prompt){
   setDrive('connecting','Connecting to Google Drive…');
-  try{await requestToken(prompt);silentBlocked=false;localStorage.setItem('kyth_linked','1');
+  try{await requestToken(prompt);silentBlocked=false;tapUsed=false;localStorage.setItem('kyth_linked','1');
     if(!driveReady)await loadMemory();else if(pending)await saveMemory();
-    setDrive('connected','Memory synced with Google Drive.');scheduleRefresh();return true}
+    setDrive('connected','Memory synced with Google Drive.');scheduleRefresh();rememberUser();return true}
   catch(e){return failConnect(e)}}
+function rememberUser(){if(localStorage.getItem('kyth_hint'))return;   // account email only, used as a sign-in hint; not a token
+  api('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)').then(r=>r.json())
+    .then(j=>{const m=j&&j.user&&j.user.emailAddress;if(m)localStorage.setItem('kyth_hint',m)}).catch(e=>{if(!token)failConnect(e)})}
 function failConnect(e){const m=(e&&e.message)||'';
   if(m==='no_client_id'){setDrive('offline','Add your OAuth Client ID in Settings, then sign in.');return false}
   if(m==='corrupt'){setDrive('offline','The Drive memory file could not be read, so nothing was overwritten. Your data is safe on this device.');return false}
   if(m==='gis_unavailable'||(e&&e.name==='TypeError')||!navigator.onLine){pending=true;
     setDrive('offline','Drive is unreachable. Your notes and tasks are saved on this device and will sync automatically when it is back.');return false}
   if(/^\d+$/.test(m)&&m!=='401'){pending=true;setDrive('offline','Google Drive returned error '+m+'. Your data is safe on this device.');return false}
-  silentBlocked=true;pending=true;token=null;tokenExp=0;
-  setDrive('reconnect','Google needs you to confirm access. Tap Reconnect Google. Your notes and tasks are safe on this device.');
-  log('j','Drive needs reconnecting. Tap Reconnect Google.');return false}
+  token=null;tokenExp=0;pending=true;
+  // Browser blocked the silent sign-in window because there was no tap yet: allow exactly one more try on the next tap.
+  if(/popup_failed_to_open|gesture_required/.test(m)&&!tapUsed&&!silentBlocked){
+    setDrive('reconnect','Google needs a tap before it can reconnect. Tap anywhere on this page, or press Reconnect Google. Your notes and tasks are safe on this device. ('+m+')');
+    log('j','Drive needs a tap to reconnect.');armTap();return false}
+  // Google itself refused to sign in silently (or the retry failed): stop all automatic attempts.
+  silentBlocked=true;
+  setDrive('reconnect','Google did not allow silent reconnection. Press Reconnect Google to confirm. Your notes and tasks are safe on this device. ('+m+')');
+  log('j','Drive needs reconnecting. Press Reconnect Google.');return false}
+function armTap(){if(tapArmed||tapUsed||silentBlocked||!linked())return;tapArmed=true;document.addEventListener('click',onTap,true)}
+function onTap(e){document.removeEventListener('click',onTap,true);tapArmed=false;
+  if(e&&e.target&&e.target.closest&&e.target.closest('#bRecon,#bConn'))return;   // the buttons handle themselves
+  if(driveState==='connecting'||tapUsed||silentBlocked||!clientId()||!gisReady())return;
+  tapUsed=true;connect('')}   // real tap: Google stays silent if it can, shows its window only if it must
 function signIn(){const c=clientId();
   if(!c){say('Add your Google client ID in Settings first.');show('settings');return}
   if(!gisReady()){say('Google sign in has not loaded. Check your connection.');return}
-  localStorage.setItem('kyth_cid',c);silentBlocked=false;
+  localStorage.setItem('kyth_cid',c);silentBlocked=false;tapUsed=false;
   connect(linked()?'':'consent').then(ok=>say(ok?'Drive connected. Memory loaded.':'Could not connect to Drive. Your data is safe on this device.'))}
-function resume(){
-  if(!navigator.onLine||driveState==='reconnect'||driveState==='connecting')return;
-  if(!token){if(linked()&&clientId()&&gisReady()&&!silentBlocked)connect('none');return}
+function resume(){   // network came back / retry timer: only flush data when a token exists; never opens a sign-in window by itself
+  if(!navigator.onLine||driveState==='connecting')return;
+  if(!token){armTap();return}
   const done=()=>{setDrive('connected','Memory synced with Google Drive.');scheduleRefresh()};
   if(!driveReady)loadMemory().then(done).catch(failConnect);
   else if(pending)saveMemory().then(done).catch(failConnect)}
-function whenGIS(ok,fail){let n=0;const t=setInterval(()=>{if(gisReady()){clearInterval(t);ok()}else if(++n>50){clearInterval(t);fail()}},200)}
+function startAuto(){   // page load: one silent attempt, after Google's script is actually ready
+  if(!(clientId()&&linked())){setDrive('offline','Not connected. Notes and tasks are saved on this device. Add your Client ID and sign in to sync with Drive.');return}
+  const go=()=>{if(autoStarted)return;autoStarted=true;connect('none')};
+  if(gisReady())return go();
+  setDrive('connecting','Waiting for Google sign-in to load…');
+  window.addEventListener('gis-ready',go,{once:true});
+  setTimeout(()=>{if(!autoStarted)failConnect(new Error('gis_unavailable'))},15000)}
 window.addEventListener('online',resume);
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&linked()&&!silentBlocked&&(!token||tokenExp-Date.now()<120000))resume()});
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState!=='visible'||!linked()||silentBlocked)return;
+  if(token&&Date.now()>=tokenExp){failConnect(new Error('gesture_required'));return}   // expired while away: say so, arm one tap
+  if(!token||tokenExp-Date.now()<120000)armTap()});
 setInterval(()=>{if(pending&&driveState==='offline')resume()},60000);
 
 /* ---------- Voice ---------- */
@@ -420,8 +442,7 @@ function syncSettings(){$('#wake').value=data.settings.wake;$('#rate').value=dat
 const _render=render;render=function(){_render();syncSettings();ui()};
 $('#cid').value=localStorage.getItem('kyth_cid')||'';
 loadLocal();render();
-if(clientId()&&linked()){setDrive('connecting','Reconnecting to Google Drive…');whenGIS(()=>connect('none'),()=>failConnect(new Error('gis_unavailable')))}
-else setDrive('offline','Not connected. Notes and tasks are saved on this device. Add your Client ID and sign in to sync with Drive.');
+startAuto();
 log('j','Kyth Jarvis online. Sign in to Google Drive in Settings to keep your memory.');
 </script>
 </body></html>
