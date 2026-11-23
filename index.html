@@ -54,6 +54,7 @@ button.b.red{color:var(--bad);border-color:rgba(255,84,112,.4)}
 .item:last-child{border:0}
 .item .n{color:var(--c);font-weight:700;min-width:26px}
 .item .t{flex:1;line-height:1.4;word-break:break-word}
+.item .t a{color:var(--c)}
 .item .t small{display:block;color:var(--dim);font-size:11px;margin-top:3px}
 .item.done .t{text-decoration:line-through;opacity:.45}
 .item button{background:none;border:0;color:var(--dim);cursor:pointer;font-size:12px;letter-spacing:.1em;text-transform:uppercase;padding:4px 6px}
@@ -82,6 +83,7 @@ nav button{flex:1;padding:10px 6px;font-size:10px;text-align:center;letter-spaci
 <button data-v="home" class="on">Home</button>
 <button data-v="memory">Memory</button>
 <button data-v="tasks">Tasks</button>
+<button data-v="research">Research</button>
 <button data-v="voice">Voice</button>
 <button data-v="settings">Settings</button>
 <div class="sp"></div>
@@ -89,13 +91,14 @@ nav button{flex:1;padding:10px 6px;font-size:10px;text-align:center;letter-spaci
 </nav>
 <main>
 <div class="top glass"><h2 id="title">Home</h2>
-<span class="pill" id="pMic">Mic off</span><span class="pill" id="pDrive">Drive offline</span></div>
+<span class="pill" id="pMic">Mic off</span><button class="b" id="bRecon" style="display:none;padding:5px 11px;font-size:11px">Reconnect Google</button><span class="pill" id="pDrive">Drive offline</span></div>
 
 <section class="view on" id="v-home">
 <div class="hero glass"><div class="reactor" id="reactor"><i></i><i></i><i></i><em></em></div>
 <div><h1>Good day. Systems online.</h1><p>Say <b style="color:var(--c)">“Jarvis, add note ...”</b> or <b style="color:var(--c)">“Jarvis, add task ...”</b>. Turn on the mic from the Voice section.</p></div></div>
 <div class="grid">
 <div class="card glass stat"><b id="sN">0</b><span>Notes</span></div>
+<div class="card glass stat"><b id="sR">0</b><span>Research</span></div>
 <div class="card glass stat"><b id="sT">0</b><span>Open tasks</span></div>
 <div class="card glass stat"><b id="sC">0</b><span>Commands</span></div>
 <div class="card glass stat"><b id="sD">—</b><span>Last sync</span></div></div>
@@ -112,6 +115,13 @@ nav button{flex:1;padding:10px 6px;font-size:10px;text-align:center;letter-spaci
 <div class="card glass"><div id="taskList"></div></div>
 </section>
 
+<section class="view" id="v-research">
+<div class="card glass"><h3>New research topic</h3>
+<div class="row"><input id="resTopic" placeholder="Topic..."><input id="resLink" placeholder="Link (optional)"></div>
+<div class="row" style="margin-top:10px"><textarea id="resNotes" rows="2" placeholder="Findings / notes..."></textarea><button class="b" id="resAdd">Save</button></div></div>
+<div class="card glass"><div class="row"><input id="resQ" placeholder="Search research..."></div><div id="resList"></div></div>
+</section>
+
 <section class="view" id="v-voice">
 <div class="card glass"><h3>Voice controls</h3><div class="row">
 <button class="b" id="bListen">Start listening</button>
@@ -122,7 +132,7 @@ nav button{flex:1;padding:10px 6px;font-size:10px;text-align:center;letter-spaci
 <div class="row" style="margin-top:12px"><input id="cmdIn" placeholder="Type a command (no wake word needed)"><button class="b" id="cmdGo">Run</button></div></div>
 <div class="card glass"><h3>Commands</h3><div class="cmds">
 <b>save note</b> blockchain idea<br><b>show notes</b> / <b>show note</b> 2<br><b>search notes</b> blockchain<br><b>edit note</b> 2 to new text<br><b>delete note</b> 2<br>
-<b>add task</b> call client high priority<br><b>show tasks</b><br><b>complete task</b> 1<br><b>delete task</b> 1<br><b>set priority</b> task 2 high<br><b>go to</b> tasks</div></div>
+<b>add task</b> call client high priority<br><b>show tasks</b><br><b>complete task</b> 1<br><b>delete task</b> 1<br><b>set priority</b> task 2 high<br><b>save research</b> AI trends<br><b>show research</b> / <b>show research</b> 1<br><b>search research</b> AI<br><b>add finding to research</b> 1 your finding<br><b>edit research</b> 1 to new topic<br><b>delete research</b> 1<br><b>go to</b> tasks</div></div>
 <div class="card glass"><h3>Command history</h3><div id="hist"></div></div>
 </section>
 
@@ -130,6 +140,7 @@ nav button{flex:1;padding:10px 6px;font-size:10px;text-align:center;letter-spaci
 <div class="card glass"><h3>Google Drive</h3>
 <label>OAuth Client ID</label><input id="cid" style="width:100%" placeholder="xxxx.apps.googleusercontent.com">
 <div class="row" style="margin-top:12px"><button class="b" id="bConn">Sign in with Google</button><button class="b" id="bSave">Save now</button><button class="b" id="bLoad">Reload from Drive</button></div>
+<p class="help" id="driveMsg" style="margin-top:12px"></p>
 <p class="help" style="margin-top:12px">Create an OAuth Web Client ID in Google Cloud Console, enable the Drive API, and add this page’s origin (for example <code>http://localhost:8000</code>) under Authorized JavaScript origins. The app only requests the <code>drive.file</code> scope, so it can only touch the <code>jarvis-data.json</code> file it creates. It will not work from a <code>file://</code> address.</p></div>
 <div class="card glass"><h3>Assistant</h3>
 <label>Wake word</label><input id="wake" style="width:100%">
@@ -143,61 +154,135 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const FILE='jarvis-data.json';
-let data={notes:[],tasks:[],research:[],settings:{wake:'jarvis',rate:1,lang:'en-US'},conversations:[]};
+let data={notes:[],tasks:[],research:[],settings:{wake:'jarvis',rate:1,lang:'en-US'},conversations:[],deleted:[]};
 let token=null,fileId=null,saveTimer=null,lastSync=null,tc=null;
 
-/* ---------- Local storage (offline cache, independent of Drive) ---------- */
-const LS='kyth_data';
+/* ---------- Local storage (offline backup, independent of Drive) ---------- */
+const LS='kyth_data',KEYS=['notes','tasks','research','conversations'];
 function saveLocal(){try{localStorage.setItem(LS,JSON.stringify(data))}catch(e){console.warn('Local save failed',e)}}
-function loadLocal(){try{const d=JSON.parse(localStorage.getItem(LS)||'null');
-  if(d)data={...data,...d,settings:{...data.settings,...(d.settings||{})}}}catch(e){console.warn('Local load failed',e)}}
-const mergeList=(a=[],b=[])=>{const m=new Map();[...a,...b].forEach(x=>m.set(x.id,x));
+function loadLocal(){let raw=null;
+  try{raw=localStorage.getItem(LS);const d=JSON.parse(raw||'null');
+    if(d&&typeof d==='object')data={...data,...d,settings:{...data.settings,...(d.settings||{})}}}
+  catch(e){console.warn('Local load failed',e);try{localStorage.setItem('kyth_data_corrupt',raw)}catch(x){}}
+  KEYS.concat('deleted').forEach(k=>{if(!Array.isArray(data[k]))data[k]=[]})}
+
+/* ---------- Merge rules (never lose data when two copies meet) ---------- */
+const ts=x=>x.updated||x.created||x.t||0, arr=v=>Array.isArray(v)?v:[];
+const mergeList=(a,b,gone)=>{const m=new Map();
+  [...arr(a),...arr(b)].forEach(x=>{if(!x||!x.id||gone.has(x.id))return;const o=m.get(x.id);if(!o||ts(x)>=ts(o))m.set(x.id,x)});
   return [...m.values()].sort((x,y)=>(x.created||x.t||0)-(y.created||y.t||0))};
+const mergeDel=(a,b)=>{const m=new Map();[...arr(a),...arr(b)].forEach(x=>{if(x&&x.id)m.set(x.id,x)});return [...m.values()].slice(-500)};
+function mergeRemote(d,remoteWins){const L=data,del=mergeDel(L.deleted,d.deleted),gone=new Set(del.map(x=>x.id));
+  data={...L,...d};KEYS.forEach(k=>data[k]=mergeList(L[k],d[k],gone));
+  data.conversations=data.conversations.slice(-200);data.deleted=del;
+  data.settings=remoteWins?{...L.settings,...(d.settings||{})}:{...(d.settings||{}),...L.settings}}
+
+/* ---------- Connection state ---------- */
+const SCOPE='https://www.googleapis.com/auth/drive.file';
+const ST={offline:['Drive offline',''],connecting:['Connecting…',''],connected:['Drive connected','on'],reconnect:['Reconnect required','bad']};
+let driveState='offline',tokenExp=0,tcCid='',waiter=null,waiterT=0,driveReady=false,remoteMod=null,pending=false,silentBlocked=false,refreshT=0,saveQ=Promise.resolve();
+const clientId=()=>$('#cid').value.trim(), linked=()=>localStorage.getItem('kyth_linked')==='1';
+const gisReady=()=>!!(window.google&&google.accounts&&google.accounts.oauth2);
+function setDrive(st,msg){driveState=st;const[t,c]=ST[st];
+  $('#pDrive').textContent=t;$('#pDrive').className='pill '+c;
+  $('#driveSide').textContent=t;$('#driveSide').className='side pill '+c;
+  $('#bRecon').style.display=st==='reconnect'?'':'none';$('#driveMsg').textContent=msg||''}
+
+/* ---------- Google token (kept in memory only, never in localStorage) ---------- */
+function getTC(){const c=clientId();
+  if(!tc||tcCid!==c){tcCid=c;tc=google.accounts.oauth2.initTokenClient({client_id:c,scope:SCOPE,callback:onToken,
+    error_callback:e=>settle(new Error((e&&e.type)||'popup_error'))})}return tc}
+function settle(err,tok){const w=waiter;waiter=null;clearTimeout(waiterT);if(w)err?w.rej(err):w.res(tok)}
+function onToken(r){
+  if(r.error)return settle(new Error(r.error));
+  if(!google.accounts.oauth2.hasGrantedAllScopes(r,SCOPE))return settle(new Error('scope_denied'));
+  token=r.access_token;tokenExp=Date.now()+(+r.expires_in||3600)*1000;settle(null,token)}
+function requestToken(prompt){return new Promise((res,rej)=>{
+  if(!gisReady())return rej(new Error('gis_unavailable'));
+  if(!clientId())return rej(new Error('no_client_id'));
+  if(waiter)settle(new Error('superseded'));
+  waiter={res,rej};waiterT=setTimeout(()=>settle(new Error('timeout')),20000);
+  try{getTC().requestAccessToken({prompt})}catch(e){settle(e)}})}
+function scheduleRefresh(){clearTimeout(refreshT);
+  refreshT=setTimeout(()=>{if(!silentBlocked)connect('none')},Math.max(15000,tokenExp-Date.now()-300000))}
+
+async function api(url,opt={},retry=true){
+  if(!token)throw new Error('interaction_required');
+  const r=await fetch(url,{...opt,headers:{Authorization:'Bearer '+token,...(opt.headers||{})}});
+  if(r.status===401&&retry){token=null;tokenExp=0;
+    if(silentBlocked)throw new Error('interaction_required');
+    await requestToken('none');return api(url,opt,false)}
+  if(!r.ok)throw new Error(String(r.status));return r}
 
 /* ---------- Drive memory ---------- */
-async function api(url,opt={}){
-  const r=await fetch(url,{...opt,headers:{Authorization:'Bearer '+token,...(opt.headers||{})}});
-  if(r.status===401){setDrive(false,'Session expired');throw new Error('401')}
-  if(!r.ok)throw new Error(r.status);return r}
-async function loadMemory(){
-  if(!token)return;
+const enqueue=f=>{const p=saveQ.then(f);saveQ=p.catch(()=>{});return p};
+const saveMemory=()=>enqueue(doSave), loadMemory=()=>enqueue(doLoad);
+const D='https://www.googleapis.com/drive/v3/files',U='https://www.googleapis.com/upload/drive/v3/files';
+async function pullInto(remoteWins){
+  const meta=await(await api(`${D}/${fileId}?fields=modifiedTime`)).json();
+  const d=await(await api(`${D}/${fileId}?alt=media`)).json();
+  if(!d||typeof d!=='object'||Array.isArray(d))throw new SyntaxError('bad file');
+  mergeRemote(d,remoteWins);remoteMod=meta.modifiedTime;saveLocal();render()}
+async function createFile(){const b='kythbound';
+  const m=`--${b}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify({name:FILE,mimeType:'application/json'})}\r\n--${b}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(data,null,1)}\r\n--${b}--`;
+  const r=await(await api(`${U}?uploadType=multipart&fields=id,modifiedTime`,{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+b},body:m})).json();
+  fileId=r.id;remoteMod=r.modifiedTime}
+async function doLoad(){
   const q=encodeURIComponent(`name='${FILE}' and trashed=false`);
-  const l=await(await api(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`)).json();
-  if(l.files.length){fileId=l.files[0].id;
-    const d=await(await api(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`)).json();
-    const L=data;
-    data={...L,...d,settings:{...L.settings,...(d.settings||{})}};
-    ['notes','tasks','research','conversations'].forEach(k=>data[k]=mergeList(L[k],d[k]));
-  }
-  saveLocal();await saveMemory();
+  const l=await(await api(`${D}?q=${q}&orderBy=modifiedTime%20desc&fields=files(id,modifiedTime)`)).json();
+  if(l.files&&l.files.length){fileId=l.files[0].id;
+    try{await pullInto(true)}catch(e){if(e&&e.name==='SyntaxError')throw new Error('corrupt');throw e}
+    driveReady=true;await doSave()}
+  else{await createFile();driveReady=true;pending=false}
   lastSync=new Date();render()}
-async function saveMemory(){
-  if(!token)return;
-  const body=JSON.stringify(data,null,1);
-  if(fileId)await api(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,{method:'PATCH',headers:{'Content-Type':'application/json'},body});
-  else{const b='kythbound';
-    const m=`--${b}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify({name:FILE,mimeType:'application/json'})}\r\n--${b}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${b}--`;
-    const r=await(await api('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+b},body:m})).json();
-    fileId=r.id}
-  lastSync=new Date();renderStats()}
+async function doSave(){
+  if(!token||!driveReady||!fileId){pending=true;return false}
+  try{
+    const m=await(await api(`${D}/${fileId}?fields=modifiedTime`)).json();
+    if(m.modifiedTime!==remoteMod)await pullInto(false);   // another device wrote first: merge, never overwrite
+    const r=await(await api(`${U}/${fileId}?uploadType=media&fields=modifiedTime`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data,null,1)})).json();
+    remoteMod=r.modifiedTime;pending=false;lastSync=new Date();renderStats();return true
+  }catch(e){if(e.message==='404'){driveReady=false;fileId=null;await doLoad();return true}throw e}}
+function syncSoon(){pending=true;clearTimeout(saveTimer);
+  saveTimer=setTimeout(()=>{if(token&&driveReady)saveMemory().catch(failConnect)},800)}
+
 function addMemory(col,item){item.id=uid();item.created=Date.now();data[col].push(item);commit();return item}
 function editMemory(col,id,patch){const o=data[col].find(x=>x.id===id);if(o){Object.assign(o,patch,{updated:Date.now()});commit()}return o}
-function deleteMemory(col,id){const i=data[col].findIndex(x=>x.id===id);if(i<0)return null;const[o]=data[col].splice(i,1);commit();return o}
-function commit(){saveLocal();render();clearTimeout(saveTimer);saveTimer=setTimeout(()=>saveMemory().catch(()=>{}),800)}
+function deleteMemory(col,id){const i=data[col].findIndex(x=>x.id===id);if(i<0)return null;const[o]=data[col].splice(i,1);
+  data.deleted.push({id,t:Date.now()});data.deleted=data.deleted.slice(-500);commit();return o}
+function commit(){saveLocal();render();syncSoon()}
 
-/* ---------- Auth ---------- */
-function setDrive(on,txt){$('#pDrive').textContent=txt||(on?'Drive linked':'Drive offline');$('#pDrive').className='pill '+(on?'on':'bad');
-  $('#driveSide').textContent=$('#pDrive').textContent;$('#driveSide').className='side pill '+(on?'on':'')}
-function signIn(){
-  const cid=$('#cid').value.trim();
-  if(!cid){say('Add your Google client ID in Settings first.');show('settings');return}
-  if(!window.google){say('Google sign in has not loaded. Check your connection.');return}
-  localStorage.setItem('kyth_cid',cid);
-  tc=google.accounts.oauth2.initTokenClient({client_id:cid,scope:'https://www.googleapis.com/auth/drive.file',
-    callback:async r=>{if(r.error){say('Sign in failed.');return}
-      token=r.access_token;setDrive(true);
-      try{await loadMemory();say('Drive connected. Memory loaded.')}catch(e){say('Could not read Drive.')}}});
-  tc.requestAccessToken({prompt:token?'':'consent'})}
+/* ---------- Connect / reconnect ---------- */
+async function connect(prompt){
+  setDrive('connecting','Connecting to Google Drive…');
+  try{await requestToken(prompt);silentBlocked=false;localStorage.setItem('kyth_linked','1');
+    if(!driveReady)await loadMemory();else if(pending)await saveMemory();
+    setDrive('connected','Memory synced with Google Drive.');scheduleRefresh();return true}
+  catch(e){return failConnect(e)}}
+function failConnect(e){const m=(e&&e.message)||'';
+  if(m==='no_client_id'){setDrive('offline','Add your OAuth Client ID in Settings, then sign in.');return false}
+  if(m==='corrupt'){setDrive('offline','The Drive memory file could not be read, so nothing was overwritten. Your data is safe on this device.');return false}
+  if(m==='gis_unavailable'||(e&&e.name==='TypeError')||!navigator.onLine){pending=true;
+    setDrive('offline','Drive is unreachable. Your notes and tasks are saved on this device and will sync automatically when it is back.');return false}
+  if(/^\d+$/.test(m)&&m!=='401'){pending=true;setDrive('offline','Google Drive returned error '+m+'. Your data is safe on this device.');return false}
+  silentBlocked=true;pending=true;token=null;tokenExp=0;
+  setDrive('reconnect','Google needs you to confirm access. Tap Reconnect Google. Your notes and tasks are safe on this device.');
+  log('j','Drive needs reconnecting. Tap Reconnect Google.');return false}
+function signIn(){const c=clientId();
+  if(!c){say('Add your Google client ID in Settings first.');show('settings');return}
+  if(!gisReady()){say('Google sign in has not loaded. Check your connection.');return}
+  localStorage.setItem('kyth_cid',c);silentBlocked=false;
+  connect(linked()?'':'consent').then(ok=>say(ok?'Drive connected. Memory loaded.':'Could not connect to Drive. Your data is safe on this device.'))}
+function resume(){
+  if(!navigator.onLine||driveState==='reconnect'||driveState==='connecting')return;
+  if(!token){if(linked()&&clientId()&&gisReady()&&!silentBlocked)connect('none');return}
+  const done=()=>{setDrive('connected','Memory synced with Google Drive.');scheduleRefresh()};
+  if(!driveReady)loadMemory().then(done).catch(failConnect);
+  else if(pending)saveMemory().then(done).catch(failConnect)}
+function whenGIS(ok,fail){let n=0;const t=setInterval(()=>{if(gisReady()){clearInterval(t);ok()}else if(++n>50){clearInterval(t);fail()}},200)}
+window.addEventListener('online',resume);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&linked()&&!silentBlocked&&(!token||tokenExp-Date.now()<120000))resume()});
+setInterval(()=>{if(pending&&driveState==='offline')resume()},60000);
 
 /* ---------- Voice ---------- */
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
@@ -254,17 +339,30 @@ function runCommand(cmd,raw){
   else if(m=cmd.match(new RegExp(`^(?:complete|finish|done)(?: with)? task ${N}$`))){const o=nth('tasks',m[1]);r=o?(editMemory('tasks',o.id,{done:true}),'Task completed.'):'I cannot find that task.'}
   else if(m=cmd.match(new RegExp(`^delete task ${N}$`))){const o=nth('tasks',m[1]);r=o?(deleteMemory('tasks',o.id),'Task deleted.'):'I cannot find that task.'}
   else if(m=cmd.match(new RegExp(`^(?:set )?priority(?: of)?(?: task)? ${N}(?: to)? (high|medium|low)$`))){const o=nth('tasks',m[1]);r=o?(editMemory('tasks',o.id,{priority:m[2]}),`Task ${m[1]} is now ${m[2]} priority.`):'I cannot find that task.'}
-  else if(m=cmd.match(/^(?:go to|open|show)(?: the)? (home|memory|notes|tasks|voice|settings)(?: page| section)?$/)){show(m[1]==='notes'?'memory':m[1]);r='Opening '+m[1]+'.'}
+  else if(m=cmd.match(/^(?:save|add|create|new)(?: a| new)? research\s*(.*)$/)){
+    r=m[1]?(addMemory('research',{topic:m[1],link:'',notes:''}),'Research topic saved.'):'What is the research topic?'}
+  else if(m=cmd.match(new RegExp(`^(?:add|append) (?:finding|findings|detail|details|info|note) to research ${N} (.+)$`))){const o=nth('research',m[1]);
+    r=o?(editMemory('research',o.id,{notes:(o.notes?o.notes+'\n':'')+m[2]}),'Finding added.'):'I cannot find that research topic.'}
+  else if(m=cmd.match(new RegExp(`^(?:show|read|open) research ${N}$`))){const o=nth('research',m[1]);
+    r=o?`Research ${m[1]}: ${o.topic}. ${o.notes||'No findings yet.'}`:'I cannot find that research topic.'}
+  else if(/^(?:show|read|list|open)(?: me)?(?: my| all)? research$/.test(cmd)){show('research');const n=data.research;
+    r=n.length?`You have ${n.length} research topic${n.length>1?'s':''}. `+n.slice(-3).map((x,i)=>`Research ${n.length-Math.min(3,n.length)+i+1}: ${x.topic}`).join('. '):'You have no research yet.'}
+  else if(m=cmd.match(/^search research(?: for)?\s+(.+)$/)){show('research');$('#resQ').value=m[1];renderResearch();
+    const h=data.research.filter(x=>[x.topic,x.notes,x.link].join(' ').toLowerCase().includes(m[1]));
+    r=h.length?`I found ${h.length}. `+h.slice(0,3).map(x=>x.topic).join('. '):'No research matches that.'}
+  else if(m=cmd.match(new RegExp(`^delete research ${N}$`))){const o=nth('research',m[1]);r=o?(deleteMemory('research',o.id),'Research deleted.'):'I cannot find that research topic.'}
+  else if(m=cmd.match(new RegExp(`^edit research ${N}(?: to| with| as)? (.+)$`))){const o=nth('research',m[1]);r=o?(editMemory('research',o.id,{topic:m[2]}),'Research updated.'):'I cannot find that research topic.'}
+  else if(m=cmd.match(/^(?:go to|open|show)(?: the)? (home|memory|notes|tasks|research|voice|settings)(?: page| section)?$/)){show(m[1]==='notes'?'memory':m[1]);r='Opening '+m[1]+'.'}
   else if(/^(?:stop listening|go to sleep)$/.test(cmd)){r='Going quiet.';setTimeout(stopListening,1500)}
   else r='Sorry, I did not understand that.';
   say(r);
   data.conversations.push({id:uid(),t:Date.now(),cmd,reply:r});if(data.conversations.length>200)data.conversations.shift();
-  saveLocal();clearTimeout(saveTimer);saveTimer=setTimeout(()=>saveMemory().catch(()=>{}),800);renderHist()}
+  saveLocal();syncSoon();renderHist()}
 
 /* ---------- Render ---------- */
 const PR=['high','medium','low'];
 function ago(t){return new Date(t).toLocaleString([], {dateStyle:'short',timeStyle:'short'})}
-function renderStats(){$('#sN').textContent=data.notes.length;$('#sT').textContent=data.tasks.filter(x=>!x.done).length;
+function renderStats(){$('#sN').textContent=data.notes.length;$('#sR').textContent=data.research.length;$('#sT').textContent=data.tasks.filter(x=>!x.done).length;
   $('#sC').textContent=data.conversations.length;$('#sD').textContent=lastSync?lastSync.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):'—'}
 function renderHist(){const h=[...data.conversations].reverse();
   const row=x=>`<div class="item"><div class="t">${esc(x.cmd)}<small>${esc(x.reply)} · ${ago(x.t)}</small></div></div>`;
@@ -275,7 +373,10 @@ function renderNotes(){const q=$('#noteQ').value.toLowerCase();
   $('#noteList').innerHTML=l.map(({x,i})=>`<div class="item"><div class="n">${i+1}</div><div class="t">${esc(x.text)}<small>${ago(x.created)}</small></div><button data-a="en" data-id="${x.id}">Edit</button><button data-a="dn" data-id="${x.id}">Delete</button></div>`).join('')||'<div class="empty">No notes found.</div>'}
 function renderTasks(){
   $('#taskList').innerHTML=data.tasks.map((x,i)=>`<div class="item ${x.done?'done':''}"><div class="n">${i+1}</div><div class="t">${esc(x.text)}</div><span class="tag ${x.priority}" data-a="pt" data-id="${x.id}">${x.priority}</span><button data-a="ct" data-id="${x.id}">${x.done?'Undo':'Done'}</button><button data-a="dt" data-id="${x.id}">Delete</button></div>`).join('')||'<div class="empty">No tasks yet.</div>'}
-function render(){renderStats();renderHist();renderNotes();renderTasks()}
+function renderResearch(){const q=$('#resQ').value.toLowerCase();
+  const l=data.research.map((x,i)=>({x,i})).filter(o=>[o.x.topic,o.x.notes,o.x.link].join(' ').toLowerCase().includes(q));
+  $('#resList').innerHTML=l.map(({x,i})=>`<div class="item"><div class="n">${i+1}</div><div class="t"><b>${esc(x.topic)}</b>${/^https?:\/\//i.test(x.link||'')?`<small><a href="${esc(x.link)}" target="_blank" rel="noopener noreferrer">${esc(x.link)}</a></small>`:''}${x.notes?`<div style="white-space:pre-wrap;margin-top:6px;color:var(--dim)">${esc(x.notes)}</div>`:''}<small>${ago(x.created)}</small></div><button data-a="er" data-id="${x.id}">Edit</button><button data-a="dr" data-id="${x.id}">Delete</button></div>`).join('')||'<div class="empty">No research found.</div>'}
+function render(){renderStats();renderHist();renderNotes();renderTasks();renderResearch()}
 function show(v){$$('.view').forEach(e=>e.classList.toggle('on',e.id==='v-'+v));$$('nav [data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));$('#title').textContent=v==='voice'?'Voice console':v}
 
 /* ---------- Wiring ---------- */
@@ -287,9 +388,17 @@ $('#taskIn').onkeydown=e=>{if(e.key==='Enter')$('#taskAdd').click()};
 document.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(!el)return;const id=el.dataset.id,a=el.dataset.a;
   if(a==='dn'&&confirm('Delete this note?'))deleteMemory('notes',id);
   if(a==='en'){const o=data.notes.find(x=>x.id===id),t=prompt('Edit note',o.text);if(t&&t.trim())editMemory('notes',id,{text:t.trim()})}
+  if(a==='dr'&&confirm('Delete this research item?'))deleteMemory('research',id);
+  if(a==='er'){const o=data.research.find(x=>x.id===id),t=prompt('Topic',o.topic);if(t===null)return;
+    const k=prompt('Link (optional)',o.link||''),n=prompt('Notes',o.notes||'');
+    editMemory('research',id,{topic:t.trim()||o.topic,link:(k||'').trim(),notes:n===null?(o.notes||''):n})}
   if(a==='dt')deleteMemory('tasks',id);
   if(a==='ct'){const o=data.tasks.find(x=>x.id===id);editMemory('tasks',id,{done:!o.done})}
   if(a==='pt'){const o=data.tasks.find(x=>x.id===id);editMemory('tasks',id,{priority:PR[(PR.indexOf(o.priority)+1)%3]})}});
+$('#resAdd').onclick=()=>{const t=$('#resTopic').value.trim();if(!t)return;
+  addMemory('research',{topic:t,link:$('#resLink').value.trim(),notes:$('#resNotes').value.trim()});
+  $('#resTopic').value=$('#resLink').value=$('#resNotes').value=''};
+$('#resQ').oninput=renderResearch;
 $('#bListen').onclick=()=>listening?stopListening():startListening();
 $('#bMute').onclick=()=>{muted=!muted;if(muted)speechSynthesis.cancel();ui()};
 let pr=null;const pttOn=e=>{e.preventDefault();if(!SR||pr)return;speechSynthesis.cancel();
@@ -299,16 +408,20 @@ const pttOff=()=>{try{pr&&pr.stop()}catch(e){}};
 ['mouseup','mouseleave','touchend'].forEach(v=>$('#bPtt').addEventListener(v,pttOff));
 $('#cmdGo').onclick=()=>{const v=$('#cmdIn').value.trim();if(v){$('#cmdIn').value='';heard(v,true)}};
 $('#cmdIn').onkeydown=e=>{if(e.key==='Enter')$('#cmdGo').click()};
-$('#bConn').onclick=signIn;
-$('#bSave').onclick=()=>saveMemory().then(()=>say('Memory saved to Drive.')).catch(()=>say('Save failed. Sign in first.'));
-$('#bLoad').onclick=()=>loadMemory().then(()=>say('Memory reloaded.')).catch(()=>say('Reload failed. Sign in first.'));
+$('#bConn').onclick=signIn;$('#bRecon').onclick=signIn;
+$('#bSave').onclick=()=>{if(!token){say('Drive is not connected. Your data is safe on this device. Tap Reconnect Google.');return}
+  saveMemory().then(ok=>{if(ok){setDrive('connected','Memory saved to Drive.');say('Memory saved to Drive.')}else say('Drive is not ready yet.')}).catch(e=>{failConnect(e);say('Save failed. Your data is safe on this device.')})};
+$('#bLoad').onclick=()=>{if(!token){say('Drive is not connected. Tap Reconnect Google.');return}
+  loadMemory().then(()=>{setDrive('connected','Memory synced with Google Drive.');say('Memory reloaded.')}).catch(e=>{failConnect(e);say('Reload failed. Your data is safe on this device.')})};
 $('#wake').onchange=e=>{data.settings.wake=(e.target.value.trim()||'jarvis').toLowerCase();commit();ui()};
 $('#rate').oninput=e=>{data.settings.rate=+e.target.value};$('#rate').onchange=()=>commit();
 $('#lang').onchange=e=>{data.settings.lang=e.target.value;commit();if(listening){stopListening();startListening()}};
 function syncSettings(){$('#wake').value=data.settings.wake;$('#rate').value=data.settings.rate;$('#lang').value=data.settings.lang}
 const _render=render;render=function(){_render();syncSettings();ui()};
 $('#cid').value=localStorage.getItem('kyth_cid')||'';
-loadLocal();setDrive(false);render();
+loadLocal();render();
+if(clientId()&&linked()){setDrive('connecting','Reconnecting to Google Drive…');whenGIS(()=>connect('none'),()=>failConnect(new Error('gis_unavailable')))}
+else setDrive('offline','Not connected. Notes and tasks are saved on this device. Add your Client ID and sign in to sync with Drive.');
 log('j','Kyth Jarvis online. Sign in to Google Drive in Settings to keep your memory.');
 </script>
 </body></html>
